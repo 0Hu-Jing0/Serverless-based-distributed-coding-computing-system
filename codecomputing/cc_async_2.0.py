@@ -16,7 +16,7 @@ def generate_data(column,group,code,vector1,vector2):
 
 # 调用OpenFaaS函数
 async def run_function(column,group,code,vector1,vector2):
-    url = 'http://172.27.20.221:31112/function/codecompt'
+    url = 'http://172.27.196.13:31112/function/codecompt'
     data = generate_data(column,group,code,vector1,vector2)
     req = requests.post(url,data=data)
     return req.json()
@@ -28,18 +28,19 @@ def basic_data(row_A,column_A,MIN,MAX,column_B):
     A = np.random.randint(MIN, MAX, (row_A, column_A))
     B = np.random.randint(MIN, MAX, (row_B, column_B))
     B_trans = B.T
+    A_odd = A
 
     A_is_odd = 0 # 0偶数行 1奇数行
     # 若随机矩阵A为奇数行，则为其补一行0
     if(row_A % 2 != 0):# 奇
         temp_array = np.zeros((1, column_A), dtype=np.int16)
-        A = np.r_[A, temp_array]
+        A_odd = np.r_[A, temp_array]
         row_A = row_A + 1
         A_is_odd = 1
     else:# 偶
         A_is_odd = 0
-    
-    return row_B,A_is_odd,A,B,B_trans
+
+    return row_A,row_B,A_is_odd,A,B,B_trans,A_odd
 
 # 编码
 def codecomputing_encode(A,B_trans,row_A,column_B):
@@ -65,7 +66,7 @@ def codecomputing_decode(row_A,column_B,tasks,A_is_odd):
     temp_answer = np.zeros((column_B,row_A // 2, 3), dtype=np.int16) 
     # 解码得到的最终结果
     answer = np.zeros((row_A, column_B), dtype=np.int16) 
-    
+  
     loop = asyncio.get_event_loop()
     done, _ = loop.run_until_complete(asyncio.wait(tasks))
 
@@ -76,12 +77,14 @@ def codecomputing_decode(row_A,column_B,tasks,A_is_odd):
         code = result['code']
         num = result['answer']
         if group in group_not_done[column]:# 该group还需要接收返回数据
-            # if(visit[column][group][code + 1] == 1): print("WARNING，收到重复任务")
+        # if(visit[column][group][code + 1] == 1): print("WARNING，收到重复任务")
             visit[column][group][code + 1] = 1
             visit[column][group][0] = visit[column][group][0] + 1
             temp_answer[column][group][code] = num
 
-            if(visit[column][group][0] == 2):# 该group已经接收了2个数据
+            if(group == row_A//2 - 1 and visit[column][group][1] != 0):
+                answer[group * 2 + 0][column] = temp_answer[column][group][0]
+            if(visit[column][group][0] == 2 and group != row_A//2 - 1):# 该group已经接收了2个数据
                 group_not_done[column].remove(group)
                 if(visit[column][group][1] == 0):# code1&code2
                     answer[group * 2 + 0][column] = temp_answer[column][group][2] - temp_answer[column][group][1]
@@ -94,7 +97,7 @@ def codecomputing_decode(row_A,column_B,tasks,A_is_odd):
                     answer[group * 2 + 1][column] = temp_answer[column][group][1]
 
                 if(len(group_not_done[column]) == 0): column_not_done.remove(column)
-                if(len(column_not_done) == 0): break                
+                if(len(column_not_done) == 0): break        
     loop.close()
     if(A_is_odd == 1):
         answer = np.delete(answer,row_A - 1,axis=0)
@@ -103,25 +106,25 @@ def codecomputing_decode(row_A,column_B,tasks,A_is_odd):
 
 def run():
     ################ 生成数据 ################
-    row_A = 1000
-    column_A = 1029
-    column_B = 1058
+    row_A = 100
+    column_A = 100
+    column_B = 100
     MIN = 0
     MAX = 10
-    row_B,A_is_odd,A,B,B_trans = basic_data(row_A,column_A,MIN,MAX,column_B)
+    row_A,row_B,A_is_odd,A,B,B_trans,A_odd = basic_data(row_A,column_A,MIN,MAX,column_B)
     ################# 直接计算 ###############
-    # T1 = time.time()
-    # C = np.dot(A,B)
-    # T2 = time.time()
-    # print('直接计算运行时间:%s毫秒' % ((T2 - T1)*1000))
+    T1 = time.time()
+    C = np.dot(A,B)
+    T2 = time.time()
+    print('直接计算运行时间:%s毫秒' % ((T2 - T1)*1000))
+    print(C)
     ############## codecomputing #############
     T3 = time.time()
-    tasks = codecomputing_encode(A,B_trans,row_A,column_B)
+    tasks = codecomputing_encode(A_odd,B_trans,row_A,column_B)
     answer = codecomputing_decode(row_A,column_B,tasks,A_is_odd)
     T4 = time.time()
     print('程序运行时间:%s毫秒' % ((T4 - T3)*1000))
 
-    print(C)
     print(answer)
 
 if __name__=="__main__":
